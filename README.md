@@ -4,6 +4,8 @@ A small color studio in your bar: pick colors from the screen, explore
 harmonies on an Adobe-style wheel, pull palettes out of images, and copy
 everything in the format you actually use.
 
+![The Color Studio overlay: harmony wheel with five markers, palette with codes, WCAG contrast, pick history, saved harmonies, and the active theme palette](preview.png)
+
 ## Install
 
 Requires Omarchy 4.x (Quattro). Uses `hyprpicker` and ImageMagick's
