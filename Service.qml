@@ -38,7 +38,9 @@ Item {
       if (typeof p.currentColor === "string" && CU.parseHex(p.currentColor)) cur = p.currentColor
       if (p.chooserMode === "box" || p.chooserMode === "image") mode = p.chooserMode
       if (p.imagePalette && typeof p.imagePalette.name === "string" && Array.isArray(p.imagePalette.colors))
-        root.imagePalette = { name: p.imagePalette.name, colors: p.imagePalette.colors.filter(function(c) { return !!CU.parseHex(c) }) }
+        root.imagePalette = { name: p.imagePalette.name,
+          colors: p.imagePalette.colors.filter(function(c) { return !!CU.parseHex(c) }),
+          thumb: typeof p.imagePalette.thumb === "string" ? p.imagePalette.thumb : "" }
       if (Array.isArray(p.savedHarmonies)) {
         for (var j = 0; j < p.savedHarmonies.length; j++) {
           var e = p.savedHarmonies[j]
@@ -151,6 +153,9 @@ Item {
 
   function pick() {
     if (clipBefore.running || picker.running || clipAfter.running) return
+    // The studio and the lens are both exclusive overlay surfaces — close
+    // ours first or hyprpicker loses the fight and the pick silently fails.
+    if (root.shell && typeof root.shell.hide === "function") root.shell.hide(root.pluginId)
     clipBefore.running = true
   }
 
@@ -203,6 +208,9 @@ Item {
         // and harmonies open on it. addHistory persists both in one save.
         root.currentColor = CU.toHex(rgb)
         root.addHistory(CU.toHex(rgb), "pick")
+        // A fresh pick means "work with THIS color now": leave image mode
+        // (which clears the image palette) and land back on the wheel.
+        if (root.chooserMode === "image") root.setChooserMode("wheel")
         Quickshell.execDetached(["wl-copy", out])
         Quickshell.execDetached(["omarchy-notification-send", "-e", "-u", "low", "Color picked", out + " copied"])
       }
@@ -232,13 +240,33 @@ Item {
           colors.push(rows[k].hex)
         }
         var name = extractProc.imagePath.split("/").pop()
-        root.imagePalette = { name: name, colors: colors }
-        root.saveState()
-        // Clipboard pastes are materialized under /tmp — remove ours once
-        // read so they never accumulate. Dropped/copied real files are kept.
-        if (extractProc.imagePath.indexOf("/tmp/colorstudio-") === 0)
-          Quickshell.execDetached(["rm", "-f", extractProc.imagePath])
+        // Render a small persistent thumbnail into the state dir — pasted
+        // sources get deleted from /tmp, so the preview needs its own copy.
+        Quickshell.execDetached(["sh", "-c", "rm -f '" + root.stateDir + "'/thumb-*.png"])
+        var thumb = root.stateDir + "/thumb-" + Date.now() + ".png"
+        thumbProc.pendingPalette = { name: name, colors: colors, thumb: thumb }
+        thumbProc.srcPath = extractProc.imagePath
+        thumbProc.command = ["magick", extractProc.imagePath, "-resize", "440x", thumb]
+        thumbProc.running = true
       }
+    }
+  }
+
+  Process {
+    id: thumbProc
+    property var pendingPalette: null
+    property string srcPath: ""
+    onExited: function(code, status) {
+      var p = thumbProc.pendingPalette
+      if (!p) return
+      if (code !== 0) p.thumb = ""
+      root.imagePalette = p
+      thumbProc.pendingPalette = null
+      root.saveState()
+      // Clipboard pastes are materialized under /tmp — remove ours once
+      // read so they never accumulate. Dropped/copied real files are kept.
+      if (thumbProc.srcPath.indexOf("/tmp/colorstudio-") === 0)
+        Quickshell.execDetached(["rm", "-f", thumbProc.srcPath])
     }
   }
 

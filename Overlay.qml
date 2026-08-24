@@ -754,9 +754,33 @@ Item {
                   wrapMode: Text.WordWrap
                 }
 
-                Flow {
+                Row {
                   visible: !!root.imagePalette
                   width: parent.width
+                  spacing: Style.spacing.md
+
+                  Rectangle {
+                    id: thumbFrame
+                    width: Style.space(132)
+                    height: Style.space(84)
+                    radius: root.cornerRadius / 2
+                    color: root.selectedBackground
+                    border.width: 1
+                    border.color: root.border
+                    clip: true
+
+                    Image {
+                      anchors.fill: parent
+                      anchors.margins: 1
+                      cache: false
+                      asynchronous: true
+                      fillMode: Image.PreserveAspectCrop
+                      source: root.imagePalette && root.imagePalette.thumb ? "file://" + root.imagePalette.thumb : ""
+                    }
+                  }
+
+                Flow {
+                  width: parent.width - thumbFrame.width - Style.spacing.md
                   spacing: Style.space(6)
 
                   Repeater {
@@ -795,6 +819,7 @@ Item {
                       }
                     }
                   }
+                }
                 }
               }
 
