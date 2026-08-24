@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.alexdont.color-studio",
   "name": "Color Studio",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "author": "alexdont",
   "license": "MIT",
   "description": "A small color studio in the bar: instant screen picking with history, copy in hex/RGB/HSL/HSV/OKLCH, WCAG contrast, and harmony exploration with a built-in chooser",

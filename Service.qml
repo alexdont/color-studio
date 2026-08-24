@@ -173,7 +173,10 @@ Item {
 
   Process {
     id: clipBefore
-    command: ["sh", "-c", "wl-paste -n 2>/dev/null || true"]
+    // pkill first: a stray hyprpicker (ours from a previous shell session,
+    // or the built-in binding's) holds the layer surface and would make the
+    // new lens silently fail — same defense the stock Super+Print uses.
+    command: ["sh", "-c", "pkill hyprpicker 2>/dev/null; wl-paste -n 2>/dev/null || true"]
     stdout: StdioCollector {
       onStreamFinished: {
         root.clipBeforePick = text

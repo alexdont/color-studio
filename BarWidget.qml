@@ -8,8 +8,26 @@ BarWidget {
   id: root
   moduleName: "io.github.alexdont.color-studio"
 
-  readonly property var svc: bar && bar.shell ? bar.shell.serviceFor(moduleName) : null
+  // Resolved lazily and re-tried: at shell startup the widget can be built
+  // before the service registers, and a one-shot binding would then hold
+  // null forever — leaving left-click dead until something reloaded us.
+  property var svc: null
   readonly property string lastColor: svc ? svc.lastColor : ""
+
+  function resolveSvc() {
+    if (!svc && bar && bar.shell) svc = bar.shell.serviceFor(moduleName)
+    return svc
+  }
+
+  onBarChanged: resolveSvc()
+  Component.onCompleted: resolveSvc()
+
+  Timer {
+    interval: 400
+    repeat: true
+    running: !root.svc
+    onTriggered: root.resolveSvc()
+  }
 
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
@@ -21,9 +39,10 @@ BarWidget {
     text: "󰈊"
     horizontalMargin: 7.5
     onPressed: function(b) {
-      if (!root.svc) return
-      if (b === Qt.RightButton) root.svc.toggleStudio()
-      else root.svc.pick()
+      var s = root.resolveSvc()
+      if (!s) return
+      if (b === Qt.RightButton) s.toggleStudio()
+      else s.pick()
     }
 
     Rectangle {
