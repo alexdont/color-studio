@@ -128,16 +128,32 @@ Item {
 
   // ---- image → palette ----------------------------------------------------
 
+  // Shared preamble for every magick call: reject anything that is not a
+  // regular file (resolved), cap the input at 50 MB before a single byte is
+  // decoded, and hand magick strict resource limits so a decompression bomb
+  // or pixel-flood can't exhaust memory/CPU/disk in the shell. The guard
+  // ends with "exec magick <limits>"; the caller appends its own args,
+  // which reference the validated path as "$f[0]" (first frame only, so
+  // multi-frame bombs don't multiply).
+  readonly property string magickGuard:
+    "f=\"$1\"; shift; " +
+    "[ -f \"$f\" ] || exit 0; " +
+    "sz=$(stat -Lc %s \"$f\" 2>/dev/null || echo 0); " +
+    "[ \"$sz\" -gt 0 ] && [ \"$sz\" -le 52428800 ] || exit 0; " +
+    "exec magick -limit memory 256MiB -limit map 512MiB -limit disk 1GiB " +
+    "-limit area 64MP -limit width 16384 -limit height 16384 -limit time 20"
+
   function extractFromImage(path) {
     if (extractProc.running) return
     // Absolute paths only: magick also accepts coder prefixes ("https:",
     // "label:", …) and would fetch or synthesize instead of reading a file.
     if (path.charAt(0) !== "/") return
     extractProc.imagePath = path
-    // The path rides in as "$1", never spliced into the shell string; head -c
-    // bounds the histogram a broken or hostile file could make magick print.
+    // Path rides in as "$1" (never spliced); guarded and limited before
+    // decode; head -c bounds the histogram magick prints.
     extractProc.command = ["sh", "-c",
-      "magick \"$1\" -resize '100x100^' -colors 16 -depth 8 -format '%c' histogram:info: 2>/dev/null | head -c 65536",
+      root.magickGuard + " \"$f[0]\" -resize '100x100^' -colors 16 -depth 8 " +
+      "-format '%c' histogram:info: 2>/dev/null | head -c 65536",
       "sh", path]
     extractProc.running = true
   }
@@ -271,7 +287,11 @@ Item {
         var thumb = root.stateDir + "/thumb-" + Date.now() + ".png"
         thumbProc.pendingPalette = { name: name, colors: colors, thumb: thumb }
         thumbProc.srcPath = extractProc.imagePath
-        thumbProc.command = ["magick", extractProc.imagePath, "-resize", "440x", thumb]
+        // Same guarded, limited magick. Positional args are image then
+        // thumb; the guard shifts the image off, so thumb is "$1" here.
+        thumbProc.command = ["sh", "-c",
+          root.magickGuard + " \"$f[0]\" -resize 440x \"$1\"",
+          "sh", extractProc.imagePath, thumb]
         thumbProc.running = true
       }
     }

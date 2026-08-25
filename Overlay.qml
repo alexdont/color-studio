@@ -782,6 +782,11 @@ Item {
                       cache: false
                       asynchronous: true
                       fillMode: Image.PreserveAspectCrop
+                      // Cap decoded pixels: QML decodes to sourceSize, so even
+                      // if the thumb path were swapped for a huge image it can
+                      // never decode more than this into the shell's memory.
+                      sourceSize.width: 512
+                      sourceSize.height: 512
                       source: root.imagePalette && root.imagePalette.thumb ? "file://" + root.imagePalette.thumb : ""
                     }
                   }
