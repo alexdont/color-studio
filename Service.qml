@@ -30,22 +30,37 @@ Item {
 
   function loadState(raw) {
     var history = [], pinned = [], fmt = "hex", cur = "", harmonies = [], mode = "wheel"
+    // Everything read back is re-validated to what this plugin writes —
+    // valid hex only, bounded counts and string lengths — so a crafted
+    // state file can't grow the model, feed the UI arbitrary strings, or
+    // point the thumbnail at a file outside the state dir.
+    var hexes = function(list, cap) {
+      var out = []
+      for (var k = 0; k < list.length && out.length < cap; k++) {
+        var rgb = CU.parseHex(list[k])
+        if (rgb) out.push(CU.toHex(rgb))
+      }
+      return out
+    }
     try {
       var p = JSON.parse(raw)
-      history = CU.normalizeHistory(p.history)
-      if (Array.isArray(p.pinned)) pinned = p.pinned
-      if (typeof p.defaultFormat === "string") fmt = p.defaultFormat
+      history = CU.normalizeHistory(p.history).slice(0, 50)
+      if (Array.isArray(p.pinned)) pinned = hexes(p.pinned, 50)
+      if (CU.FORMATS.indexOf(p.defaultFormat) >= 0) fmt = p.defaultFormat
       if (typeof p.currentColor === "string" && CU.parseHex(p.currentColor)) cur = p.currentColor
       if (p.chooserMode === "box" || p.chooserMode === "image") mode = p.chooserMode
-      if (p.imagePalette && typeof p.imagePalette.name === "string" && Array.isArray(p.imagePalette.colors))
-        root.imagePalette = { name: p.imagePalette.name,
-          colors: p.imagePalette.colors.filter(function(c) { return !!CU.parseHex(c) }),
-          thumb: typeof p.imagePalette.thumb === "string" ? p.imagePalette.thumb : "" }
+      if (p.imagePalette && typeof p.imagePalette.name === "string" && Array.isArray(p.imagePalette.colors)) {
+        var thumb = typeof p.imagePalette.thumb === "string" ? p.imagePalette.thumb : ""
+        if (thumb.indexOf(root.stateDir + "/thumb-") !== 0) thumb = ""
+        root.imagePalette = { name: p.imagePalette.name.slice(0, 120),
+          colors: hexes(p.imagePalette.colors, 16), thumb: thumb }
+      }
       if (Array.isArray(p.savedHarmonies)) {
-        for (var j = 0; j < p.savedHarmonies.length; j++) {
+        for (var j = 0; j < p.savedHarmonies.length && harmonies.length < 20; j++) {
           var e = p.savedHarmonies[j]
-          if (e && typeof e.rule === "string" && Array.isArray(e.colors) && e.colors.length > 0)
-            harmonies.push({ rule: e.rule, colors: e.colors.filter(function(c) { return !!CU.parseHex(c) }) })
+          if (!e || typeof e.rule !== "string" || !Array.isArray(e.colors)) continue
+          var cols = hexes(e.colors, 16)
+          if (cols.length > 0) harmonies.push({ rule: e.rule.slice(0, 120), colors: cols })
         }
       }
     } catch (e) {}
@@ -115,8 +130,15 @@ Item {
 
   function extractFromImage(path) {
     if (extractProc.running) return
+    // Absolute paths only: magick also accepts coder prefixes ("https:",
+    // "label:", …) and would fetch or synthesize instead of reading a file.
+    if (path.charAt(0) !== "/") return
     extractProc.imagePath = path
-    extractProc.command = ["magick", path, "-resize", "100x100^", "-colors", "16", "-depth", "8", "-format", "%c", "histogram:info:"]
+    // The path rides in as "$1", never spliced into the shell string; head -c
+    // bounds the histogram a broken or hostile file could make magick print.
+    extractProc.command = ["sh", "-c",
+      "magick \"$1\" -resize '100x100^' -colors 16 -depth 8 -format '%c' histogram:info: 2>/dev/null | head -c 65536",
+      "sh", path]
     extractProc.running = true
   }
 
@@ -181,7 +203,10 @@ Item {
     // pkill first: a stray hyprpicker (ours from a previous shell session,
     // or the built-in binding's) holds the layer surface and would make the
     // new lens silently fail — same defense the stock Super+Print uses.
-    command: ["sh", "-c", "pkill hyprpicker 2>/dev/null; wl-paste -n 2>/dev/null || true"]
+    // head -c bounds the collector: the clipboard can hold megabytes, and
+    // only enough to tell "did the pick change it" is needed. clipAfter uses
+    // the same cap so the before/after comparison stays valid.
+    command: ["sh", "-c", "pkill hyprpicker 2>/dev/null; { wl-paste -n 2>/dev/null || true; } | head -c 4096"]
     stdout: StdioCollector {
       onStreamFinished: {
         root.clipBeforePick = text
@@ -198,7 +223,7 @@ Item {
 
   Process {
     id: clipAfter
-    command: ["sh", "-c", "wl-paste -n 2>/dev/null || true"]
+    command: ["sh", "-c", "{ wl-paste -n 2>/dev/null || true; } | head -c 4096"]
     stdout: StdioCollector {
       onStreamFinished: {
         var rgb = CU.parseHex(text.trim())
@@ -239,10 +264,10 @@ Item {
           seen[rows[k].hex] = true
           colors.push(rows[k].hex)
         }
-        var name = extractProc.imagePath.split("/").pop()
+        var name = extractProc.imagePath.split("/").pop().slice(0, 120)
         // Render a small persistent thumbnail into the state dir — pasted
         // sources get deleted from /tmp, so the preview needs its own copy.
-        Quickshell.execDetached(["sh", "-c", "rm -f '" + root.stateDir + "'/thumb-*.png"])
+        Quickshell.execDetached(["sh", "-c", "rm -f \"$1\"/thumb-*.png", "sh", root.stateDir])
         var thumb = root.stateDir + "/thumb-" + Date.now() + ".png"
         thumbProc.pendingPalette = { name: name, colors: colors, thumb: thumb }
         thumbProc.srcPath = extractProc.imagePath
@@ -274,7 +299,7 @@ Item {
   // file, then extract. Prints nothing when the clipboard holds neither.
   Process {
     id: clipImage
-    command: ["sh", "-c", "if wl-paste -l 2>/dev/null | grep -qi '^image/'; then f=$(mktemp /tmp/colorstudio-XXXXXX.png); wl-paste --type image/png > \"$f\" 2>/dev/null && [ -s \"$f\" ] && echo \"$f\"; else p=$(wl-paste -n 2>/dev/null | head -1); p=\"${p#file://}\"; [ -f \"$p\" ] && echo \"$p\"; fi"]
+    command: ["sh", "-c", "if wl-paste -l 2>/dev/null | grep -qi '^image/'; then f=$(mktemp /tmp/colorstudio-XXXXXX.png); wl-paste --type image/png > \"$f\" 2>/dev/null && [ -s \"$f\" ] && echo \"$f\"; else p=$(wl-paste -n 2>/dev/null | head -c 4096 | head -1); p=\"${p#file://}\"; [ -f \"$p\" ] && echo \"$p\"; fi"]
     stdout: StdioCollector {
       onStreamFinished: {
         var path = text.trim()

@@ -148,7 +148,7 @@ Item {
       var hex = CU.toHex(rgb)
       if (seen[hex]) continue
       seen[hex] = true
-      out.push({ name: parts[0].trim(), hex: hex })
+      out.push({ name: parts[0].trim().slice(0, 64), hex: hex })
       if (out.length >= 16) break
     }
     root.themeColors = out
@@ -170,7 +170,9 @@ Item {
 
   Process {
     id: themeProbe
-    command: ["sh", "-c", "omarchy-theme-color --all 2>/dev/null || true"]
+    // head -c bounds what a theme can feed the parser; 16 KB covers any
+    // real palette listing many times over.
+    command: ["sh", "-c", "{ omarchy-theme-color --all 2>/dev/null || true; } | head -c 16384"]
     running: true
     stdout: StdioCollector { onStreamFinished: root.loadThemeColors(text) }
   }
@@ -209,8 +211,11 @@ Item {
           var path = ""
           if (drop.hasUrls && drop.urls.length > 0) path = String(drop.urls[0])
           else if (drop.hasText) path = String(drop.text).trim().split("\n")[0]
-          path = decodeURIComponent(path.replace(/^file:\/\//, ""))
-          if (path) root.service.extractFromImage(path)
+          // A stray "%" in a dropped string makes decodeURIComponent throw.
+          try { path = decodeURIComponent(path.replace(/^file:\/\//, "")) } catch (e) { return }
+          // Local files only — the service re-checks, but never hand magick
+          // a URL or coder-prefixed source in the first place.
+          if (path.charAt(0) === "/") root.service.extractFromImage(path)
         }
       }
 
@@ -708,6 +713,8 @@ Item {
                   Text {
                     anchors.verticalCenter: parent.verticalCenter
                     text: root.imagePalette ? root.imagePalette.name : "No image yet"
+                    // Filenames render literally, never as rich text.
+                    textFormat: Text.PlainText
                     color: root.foreground
                     opacity: 0.7
                     font.family: root.fontFamily
@@ -1250,6 +1257,7 @@ Item {
                     Text {
                       anchors.verticalCenter: parent.verticalCenter
                       text: savedRow.modelData.rule
+                      textFormat: Text.PlainText
                       color: root.foreground
                       opacity: 0.5
                       font.family: root.fontFamily
@@ -1375,6 +1383,7 @@ Item {
             width: parent.width
             text: (root.hoverLabel ? root.hoverLabel + "   ·   " : "")
               + "history/theme = select · harmony or top-left = copy · chips = format · Esc close"
+            textFormat: Text.PlainText
             color: root.foreground
             opacity: 0.5
             font.family: root.fontFamily
